@@ -1,0 +1,14 @@
+{% comment %}
+  Example: app-embed.liquid
+{% endcomment %}
+<script src="{{ 'cartSync.js' | asset_url }}" defer></script>
+
+
+{% schema %}
+{
+  "name": "cart-sync",
+  "target": "body",
+  "settings": []
+}
+{% endschema %}
+
