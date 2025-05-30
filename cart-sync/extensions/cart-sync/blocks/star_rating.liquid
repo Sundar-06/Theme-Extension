@@ -3,6 +3,21 @@
 {% endcomment %}
 <script src="{{ 'cartSync.js' | asset_url }}" defer></script>
 
+<script>
+  window.customerData = {
+    isLoggedIn: {% if customer %}true{% else %}false{% endif %},
+    email: {% if customer %}"{{ customer.email }}"{% else %}null{% endif %},
+    id: {% if customer %}{{ customer.id }}{% else %}null{% endif %}
+  };
+
+  if (window.customerData && window.customerData.isLoggedIn) {
+    console.log("Customer is logged in");
+    console.log("Email:", window.customerData.email);
+    console.log("Customer ID:", window.customerData.id);
+  } else {
+    console.log("Customer is not logged in");
+  }
+</script>
 
 {% schema %}
 {
@@ -11,4 +26,3 @@
   "settings": []
 }
 {% endschema %}
-
