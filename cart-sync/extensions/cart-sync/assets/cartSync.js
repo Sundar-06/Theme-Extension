@@ -1,7 +1,15 @@
-let retryCount = 0;
-const MAX_RETRIES = 3;
+// -------------------- 🔧 Configuration --------------------
+const CONFIG = {
+  SYNC_CART_API: 'https://express-application-7ye7.onrender.com/api/cart',
+  FETCH_SAVED_CART_API: email => `https://express-application-7ye7.onrender.com/api/cart/email/${email}`,
+  MAX_RETRIES: 3,
+  SYNC_DELAY: 500,
+  RETRY_DELAY: 2000
+};
 
-// Wrap native fetch to detect cart activity
+let retryCount = 0;
+
+// -------------------- 🛒 Fetch Wrapper --------------------
 const originalFetch = window.fetch;
 window.fetch = async (...args) => {
   const response = await originalFetch(...args);
@@ -12,19 +20,18 @@ window.fetch = async (...args) => {
     url.includes('/cart/change') ||
     url.includes('/cart/update')
   )) {
-    setTimeout(syncCartDataToServer, 500); // debounce for consistency
+    // Debounced sync to backend
+    setTimeout(syncCartDataToServer, CONFIG.SYNC_DELAY);
   }
 
   return response;
 };
 
-// You could also wrap XMLHttpRequest if needed
-
-
+// -------------------- 🔄 Sync Cart to Server --------------------
 async function syncCartDataToServer() {
   try {
-    const res = await fetch('/cart.js');
-    const cart = await res.json();
+    const cartResponse = await fetch('/cart.js');
+    const cart = await cartResponse.json();
 
     const payload = {
       customerId: window.customerData?.id || '',
@@ -32,87 +39,114 @@ async function syncCartDataToServer() {
       lineItems: cart.items
     };
 
-    const response = await fetch('https://express-application-7ye7.onrender.com/api/cart', {
+    const response = await fetch(CONFIG.SYNC_CART_API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
 
-    if (!response.ok) {
-      throw new Error(`Failed to save cart: ${response.status}`);
-    }
+    if (!response.ok) throw new Error(`Failed to save cart: ${response.status}`);
 
-    const data = await response.json(); // Parse the JSON response
+    const data = await response.json();
+    localStorage.setItem('LastSyncDate', data?.cart?.addedDate || new Date().toISOString());
 
-    localStorage.setItem('LastSyncDate', data?.cart?.addedDate);
-    retryCount = 0
+    retryCount = 0; // Reset on success
   } catch (error) {
-    console.error("Cart sync failed:", error);
-    console.warn("Cart sync failed, retrying in 2 seconds...")
-
-    if (retryCount < MAX_RETRIES) {
+    console.error('Cart sync failed:', error);
+    if (retryCount < CONFIG.MAX_RETRIES) {
       retryCount++;
-      setTimeout(syncCartDataToServer, 2000);
+      console.warn(`Retrying cart sync (${retryCount}/${CONFIG.MAX_RETRIES})...`);
+      setTimeout(syncCartDataToServer, CONFIG.RETRY_DELAY);
     }
-  } 
+  }
 }
 
+// -------------------- 🧹 Clear Shopify Cart --------------------
+async function clearShopifyCart() {
+  loader(true);
+  const res = await fetch('/cart/clear.js', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  });
 
+  if (!res.ok) throw new Error('Failed to clear existing Shopify cart');
+}
+
+// -------------------- 📦 Prepare Cart Payload --------------------
+function buildCartPayload(lineItems = []) {
+  return {
+    items: lineItems.map(item => ({
+      id: item.variant_id,
+      quantity: item.quantity,
+      properties: { ...item.properties } || {}
+    }))
+  };
+}
+
+// -------------------- 🧹 Fetch Shopify Cart --------------------
+async function fetchShopifyCart() {
+  const res = await fetch('/cart.js');
+
+  if (!res.ok) throw new Error('Failed to fetch Shopify cart');
+
+  return await res.json();
+}
+
+// -------------------- ⬇️ Sync Saved Cart from Server --------------------
 async function syncSavedCart() {
+  const user = window.customerData;
+  if (!user?.isLoggedIn) {
+    localStorage.removeItem('LastSyncDate');
+    return;
+  }
+
+  const lastSyncDate = localStorage.getItem('LastSyncDate') || '';
+  const email = user.email;
 
   try {
-    if (window.customerData && window.customerData.isLoggedIn) {
-      const LastSyncDate = localStorage.getItem('LastSyncDate');
-      const email = window.customerData.email;
+    const currentCart = await fetchShopifyCart();
 
-      const response = await fetch(`https://express-application-7ye7.onrender.com/api/cart/email/${email}`);
-      if (!response.ok) throw new Error(`Failed to fetch saved cart: ${response.status}`);
-      const savedCart = await response.json();
+    const response = await fetch(CONFIG.FETCH_SAVED_CART_API(email));
+    if (!response.ok) throw new Error(`Failed to fetch saved cart: ${response.status}`);
 
-      const cart = savedCart.cart;
+    const savedCart = await response.json();
+    const cart = savedCart?.cart;
 
-      if (cart.lineItems && cart.lineItems.length > 0 && cart.addedDate !== LastSyncDate) {
-        loader(true);
+    if (!cart) return;
 
-        // 🔸 Clear the existing Shopify cart
-        const clearRes = await fetch('/cart/clear.js', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
-        });
+    if (currentCart.items?.length && !cart.lineItems?.length) {
+      await clearShopifyCart();
+      location.reload();
+    }
 
-        if (!clearRes.ok) throw new Error("Failed to clear cart");
+    if (cart.lineItems?.length && cart.addedDate !== lastSyncDate) {
+      await clearShopifyCart();
 
-        const payload = {
-          items: cart.lineItems.map(item => ({
-            id: item.variant_id,
-            quantity: item.quantity,
-            properties: { ...item.properties } || {}
-          }))
-        };
+      const payload = buildCartPayload(cart.lineItems);;
 
-        await fetch('/cart/add.js', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        // Mark as synced to avoid infinite loop
-        localStorage.setItem('LastSyncDate', cart.addedDate);
-        // Reload once to reflect changes
-        location.reload();
-      } 
+      await fetch('/cart/add.js', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      localStorage.setItem('LastSyncDate', cart.addedDate);
+      location.reload();
     }
   } catch (err) {
-    console.error("Error syncing saved cart:", err);
+    console.error('Error syncing saved cart:', err);
   } finally {
     loader(false);
   }
 }
-document.addEventListener("DOMContentLoaded", syncSavedCart);
 
-
-function loader(isStatus) {
-  const loader = document.getElementById('cart-loader');
-  loader.style.display = isStatus ? 'flex' : 'none';
+// -------------------- 🌀 Loader Helper --------------------
+function loader(isVisible) {
+  const loaderEl = document.getElementById('cartsync-loader');
+  if (loaderEl) {
+    loaderEl.style.display = isVisible ? 'flex' : 'none';
+  }
 }
 
-
+// -------------------- 🚀 Init Sync on Load --------------------
+document.addEventListener('DOMContentLoaded', syncSavedCart);

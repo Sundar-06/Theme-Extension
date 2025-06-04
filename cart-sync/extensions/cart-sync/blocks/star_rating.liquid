@@ -1,28 +1,27 @@
-<script src="{{ 'cartSync.js' | asset_url }}" defer></script>
-
 <!-- cart_sync.liquid -->
-<div
-  id="cart-loader"
-  style="
-    display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(255, 255, 255, 0.8); z-index: 9999; align-items: center; justify-content: center;
-  "
->
-  <div style="font-size: 20px; color: #000;">Syncing cart, please wait...</div>
+
+<!-- Scripts -->
+<script src="{{ 'cartSync.js' | asset_url }}" defer></script>
+<link rel="stylesheet" href="{{ 'style.css' | asset_url }}">
+
+<!-- Cart Loader UI -->
+<div id="cartsync-loader">
+  <div class="cartsync-spinner"></div>
+  <div class="cartsync-loader-text">Syncing cart, please wait...</div>
 </div>
 
+<!-- Inject Customer Data -->
 <script>
   window.customerData = {
     isLoggedIn: {% if customer %}true{% else %}false{% endif %},
     email: {% if customer %}"{{ customer.email }}"{% else %}null{% endif %},
     id: {% if customer %}{{ customer.id }}{% else %}null{% endif %}
-  };  
-
+  };
 </script>
 
 {% schema %}
 {
-  "name": "cart-sync",
+  "name": "Cart Sync",
   "target": "body",
   "settings": []
 }
